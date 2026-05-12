@@ -117,33 +117,59 @@ class YTMPlayer:
                 self.driver.find_element(By.CSS_SELECTOR, "ytmusic-play-button-renderer").click()
                 return
 
+            # クリック前に可能な限り音量を絞る準備（video要素が既に存在する場合）
+            self.driver.execute_script("""
+                try {
+                    var v = document.querySelector('video');
+                    if (v) { v.volume = 0.0; v.muted = true; }
+                } catch(e) {}
+            """)
+
             import random
             target = random.choice(buttons)
             self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target)
             time.sleep(1)
+
+            # クリック実行
             self.driver.execute_script("arguments[0].click();", target)
             print("[ytm_player] ランダムなプレイリストを選択しました。")
-            
-            # 再生開始直後に音量を0にする
-            time.sleep(2)
-            self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
-            
+
+            # クリック直後、最速で音量を0にし、一時停止を試みる
+            # (sleep 2秒を待たずに実行)
+            self.driver.execute_script("""
+                var interval = setInterval(function() {
+                    var v = document.querySelector('video');
+                    if (v) {
+                        v.volume = 0.0;
+                        v.muted = true;
+                        v.pause();
+                        // 状態が安定するまで数回繰り返す
+                        if (v.paused && v.volume === 0) {
+                            clearInterval(interval);
+                        }
+                    }
+                }, 100);
+                // 3秒経ったらあきらめる
+                setTimeout(function() { clearInterval(interval); }, 3000);
+            """)
         except Exception as e:
             print(f"[ytm_player] ランダム再生開始エラー: {e}")
 
     def get_current_track_info(self) -> dict:
         """現在再生中（または停止中）の曲名とアーティスト名を取得する"""
         try:
-            # プレイヤーバーから情報を抽出
-            title_elem = self.driver.find_element(By.CSS_SELECTOR, "ytmusic-player-bar .title")
-            # byline には アーティスト名 / アルバム名 / 年代 が含まれることが多い
+            # ロード待ちを考慮
+            wait = WebDriverWait(self.driver, 5)
+            title_elem = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "ytmusic-player-bar .title")))
             byline_elem = self.driver.find_element(By.CSS_SELECTOR, "ytmusic-player-bar .byline")
             
             title = title_elem.text.strip()
             byline = byline_elem.text.strip()
             
-            # bylineからアーティスト名のみを抽出（通常、最初のパーツがアーティスト）
+            # bylineからアーティスト名のみを抽出
             artist = byline.split('•')[0].split('/')[0].strip()
+            if not artist:
+                artist = "Unknown Artist"
             
             return {"title": title, "artist": artist}
         except Exception as e:
@@ -153,50 +179,49 @@ class YTMPlayer:
     def next_track(self):
         """次の曲へスキップする"""
         try:
-            # 音量を0にしてからスキップ
-            self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
-            
             next_button = self.driver.find_element(By.CSS_SELECTOR, ".next-button")
             next_button.click()
             print("[ytm_player] 次の曲へスキップしました。")
-            
-            # スキップ直後も確実に音量を0に
-            time.sleep(1)
-            self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
         except Exception as e:
             print(f"[ytm_player] スキップ失敗: {e}")
-
     def stop(self):
         """再生を停止し、音量を完全に0にする"""
         try:
-            # JSで状態を確認しながら停止
+            # 1. JSで音量を0にし、一時停止（ミュートもかける）
             self.driver.execute_script("""
                 var video = document.querySelector('video');
                 if (video) {
                     video.volume = 0.0;
+                    video.muted = true; 
                     if (!video.paused) {
                         video.pause();
-                        console.log("[ytm_player] JSでvideoを一時停止しました");
                     }
                 }
             """)
             
-            # UIのボタン状態を確認して、まだ「再生中（Pause表示）」ならクリックしてUIを同期
+            # 2. UIボタンの状態を詳しくチェック
             try:
                 play_pause = self.driver.find_element(By.ID, "play-pause-button")
-                label = play_pause.get_attribute("aria-label")
-                # 再生中を示すラベル（Pause/一時停止）がある場合のみクリック
-                if label and ("Pause" in label or "一時停止" in label):
-                    # JSで止めた直後はラベルがすぐ変わらないことがあるので、
-                    # 念のためJS側のpausedも再確認
+                # aria-label, title 両方チェック
+                label = play_pause.get_attribute("aria-label") or ""
+                title = play_pause.get_attribute("title") or ""
+                btn_text = label + title
+                
+                # 「一時停止」または「Pause」が含まれていれば、現在再生中と判断してクリック
+                if any(kw in btn_text for kw in ["Pause", "一時停止", "停止"]):
+                    # JS側の状態も再確認
                     is_paused = self.driver.execute_script("return document.querySelector('video') ? document.querySelector('video').paused : true")
                     if not is_paused:
                         play_pause.click()
-                        print(f"[ytm_player] ボタンクリックで停止を確定しました (Label: {label})")
+                        print(f"[ytm_player] ボタンクリックで停止を確定しました (State: {btn_text})")
                 else:
-                    print(f"[ytm_player] 既に停止状態です (Label: {label})")
+                    # 既に停止しているはず
+                    pass
             except:
                 pass
+                
+            # 最後に念押しでもう一度ミュート＆音量0
+            self.driver.execute_script("try { var v = document.querySelector('video'); v.volume = 0.0; v.muted = true; } catch(e) {}")
                 
         except Exception as e:
             print(f"[ytm_player] 停止処理エラー: {e}")

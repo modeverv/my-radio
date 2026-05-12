@@ -4,3 +4,4 @@ headers.json
 __pycache__/
 tmp
 chrome_profile
+.idea
