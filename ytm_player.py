@@ -89,106 +89,82 @@ class YTMPlayer:
         except Exception as e:
             print(f"[ytm_player] フェード実行エラー: {e}")
 
-    def search_and_play(self, query: str) -> bool:
-        """現在のコンテキスト(プレイリスト内か検索結果か)を判断して再生する"""
+    def start_random_playlist(self):
+        """ホーム画面からランダムなプレイリストを選択して再生を開始する"""
         try:
-            # 前の曲を確実に停止し、音量を0にしておく
-            try:
-                self.driver.execute_script("""
-                    var video = document.querySelector('video');
-                    if (video) {
-                        video.volume = 0.0;
-                        video.pause();
-                    }
-                """)
-            except:
-                pass
-
-            current_url = self.driver.current_url
-            song_title = query.split(' / ')[0].split(' - ')[0].strip()
-
-            # 1. プレイリスト/チャート画面にいる場合
-            if "list=" in current_url:
-                print(f"[ytm_player] プレイリスト内で探しています: {song_title}")
-                if self._play_from_list(song_title):
-                    # 再生開始直後に音量を0にリセット
-                    self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
-                    return True
-                print(f"[ytm_player] プレイリスト内に見つかりません。検索に切り替えます。")
-
-            # 2. 検索を実行して再生する
-            success = self._execute_search_and_play(query)
-            if success:
-                # 再生開始直後に音量を0にリセット
-                self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
-            return success
-
-        except Exception as e:
-            print(f"[ytm_player] 再生処理でエラーが発生しました: {e}")
-            return False
-
-    def _play_from_list(self, song_title: str) -> bool:
-        """現在のページ（プレイリスト）内から曲を探してクリックする"""
-        try:
-            wait = WebDriverWait(self.driver, 5)
-            xpath = f"//yt-formatted-string[contains(@class, 'title') and contains(text(), '{song_title}')]"
-            song_element = wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
+            print("[ytm_player] ホーム画面へ移動中...")
+            self.driver.get("https://music.youtube.com/")
+            time.sleep(5) # ロード待ち
             
-            parent_row = song_element.find_element(By.XPATH, "./ancestor::ytmusic-responsive-list-item-renderer")
-            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", parent_row)
+            # 再生ボタン（オーバーレイ）を持つアイテムを探す
+            # ytmusic-two-row-item-renderer はプレイリストやアルバムの一般的な要素
+            selectors = [
+                "ytmusic-two-row-item-renderer ytmusic-play-button-renderer",
+                "ytmusic-responsive-list-item-renderer ytmusic-play-button-renderer",
+                ".play-button"
+            ]
+            
+            buttons = []
+            for selector in selectors:
+                found = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if found:
+                    buttons.extend(found)
+            
+            if not buttons:
+                print("[ytm_player] 再生ボタンが見つかりませんでした。デフォルトのプレイリストを開きます。")
+                self.driver.get("https://music.youtube.com/playlist?list=OLAK5uy_nMa6r07BbcC_Q8PrrS1CVHH2aGJRIkWu0")
+                time.sleep(3)
+                self.driver.find_element(By.CSS_SELECTOR, "ytmusic-play-button-renderer").click()
+                return
+
+            import random
+            target = random.choice(buttons)
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target)
             time.sleep(1)
+            self.driver.execute_script("arguments[0].click();", target)
+            print("[ytm_player] ランダムなプレイリストを選択しました。")
             
-            actions = ActionChains(self.driver)
-            actions.move_to_element(parent_row).perform()
-            time.sleep(0.5)
+            # 再生開始直後に音量を0にする
+            time.sleep(2)
+            self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
             
-            play_button = parent_row.find_element(By.CSS_SELECTOR, "ytmusic-play-button-renderer")
-            self.driver.execute_script("arguments[0].click();", play_button)
-            
-            print(f"[ytm_player] プレイリストから再生開始: {song_title}")
-            return True
-        except:
-            return False
-
-    def _execute_search_and_play(self, query: str) -> bool:
-        """グローバル検索を実行して再生する"""
-        try:
-            print(f"[ytm_player] グローバル検索を実行中: {query}")
-            wait = WebDriverWait(self.driver, 10)
-            
-            try:
-                search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "ytmusic-search-box")))
-                search_button.click()
-            except:
-                pass
-                
-            search_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input.ytmusic-search-box")))
-            search_input.clear()
-            search_input.send_keys(query)
-            search_input.send_keys(Keys.ENTER)
-            
-            time.sleep(3) 
-            
-            try:
-                top_play_button = self.driver.find_element(By.XPATH, "//ytmusic-card-shelf-renderer//ytmusic-play-button-renderer")
-                self.driver.execute_script("arguments[0].click();", top_play_button)
-                print(f"[ytm_player] 検索トップ結果から再生開始")
-                return True
-            except:
-                pass
-                
-            try:
-                play_button = self.driver.find_element(By.CSS_SELECTOR, "ytmusic-responsive-list-item-renderer ytmusic-play-button-renderer")
-                self.driver.execute_script("arguments[0].click();", play_button)
-                print(f"[ytm_player] 検索リストから再生開始")
-                return True
-            except:
-                pass
-            
-            return False
         except Exception as e:
-            print(f"[ytm_player] 検索再生に失敗しました: {e}")
-            return False
+            print(f"[ytm_player] ランダム再生開始エラー: {e}")
+
+    def get_current_track_info(self) -> dict:
+        """現在再生中（または停止中）の曲名とアーティスト名を取得する"""
+        try:
+            # プレイヤーバーから情報を抽出
+            title_elem = self.driver.find_element(By.CSS_SELECTOR, "ytmusic-player-bar .title")
+            # byline には アーティスト名 / アルバム名 / 年代 が含まれることが多い
+            byline_elem = self.driver.find_element(By.CSS_SELECTOR, "ytmusic-player-bar .byline")
+            
+            title = title_elem.text.strip()
+            byline = byline_elem.text.strip()
+            
+            # bylineからアーティスト名のみを抽出（通常、最初のパーツがアーティスト）
+            artist = byline.split('•')[0].split('/')[0].strip()
+            
+            return {"title": title, "artist": artist}
+        except Exception as e:
+            print(f"[ytm_player] 曲情報取得失敗: {e}")
+            return {"title": "不明な曲", "artist": "不明なアーティスト"}
+
+    def next_track(self):
+        """次の曲へスキップする"""
+        try:
+            # 音量を0にしてからスキップ
+            self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
+            
+            next_button = self.driver.find_element(By.CSS_SELECTOR, ".next-button")
+            next_button.click()
+            print("[ytm_player] 次の曲へスキップしました。")
+            
+            # スキップ直後も確実に音量を0に
+            time.sleep(1)
+            self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
+        except Exception as e:
+            print(f"[ytm_player] スキップ失敗: {e}")
 
     def stop(self):
         """再生を停止し、音量を完全に0にする"""
