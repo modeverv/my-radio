@@ -68,13 +68,10 @@ def run_radio_block():
     # 2. 曲の切り替え & 再生開始
     if first:
         first = False
-        # 1. 初期化: YTM開始
         ytm.start_random_playlist()
-        time.sleep(5) # ページ遷移と再生開始を待つ
-        # 最初の一曲目の情報を取得
-        initial_track = ytm.get_current_track_info()
-        print(f"[SYSTEM] 初期曲を検出: {initial_track['title']}")
+        time.sleep(2)
         current_track = ytm.get_current_track_info()
+        print(f"[SYSTEM] 初期曲を検出: {current_track['title']}")
     else:
         print("\n[PLAYER] 次の曲へ進みます...")
         ytm.next_track()
@@ -87,8 +84,7 @@ def run_radio_block():
     
     # --- 重要: 音楽再生中に「次のセグメント」の準備を開始する ---
     # get_context() もスレッド内に移動し、メインスレッドの負荷を最小限にする
-    prep_thread = threading.Thread(target=prepare_next_mc_talk, args=(current_track,))
-    prep_thread.setDaemon(True) # プログラム終了時にスレッドも終了するように
+    prep_thread = threading.Thread(target=prepare_next_mc_talk, args=(current_track,), daemon=True)
     prep_thread.start()
     # 音楽再生待機
     print(f"[WAIT] {PLAY_DURATION_SEC}秒間再生します (この間に次を準備)...")
