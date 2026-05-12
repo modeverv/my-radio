@@ -36,12 +36,14 @@ def prepare_next_mc_talk(track_info):
     except Exception as e:
         print(f"[ERROR] バックグラウンド準備中にエラー: {e}")
 
+first = True
+
 def run_radio_block():
     """
     1セグメントの進行
     """
-    global last_track_info, next_segment_data
-    
+    global last_track_info, next_segment_data, first
+
     # 1. 前のループで準備されたMCトークを再生
     path = ""
     while True:
@@ -64,11 +66,21 @@ def run_radio_block():
     tts.speak(path)
 
     # 2. 曲の切り替え & 再生開始
-    print("\n[PLAYER] 次の曲へ進みます...")
-    ytm.next_track()
-    time.sleep(2)
-    current_track = ytm.get_current_track_info()
-    print(f"[NOW PLAYING] {current_track['title']} / {current_track['artist']}")
+    if first:
+        first = False
+        # 1. 初期化: YTM開始
+        ytm.start_random_playlist()
+        time.sleep(5) # ページ遷移と再生開始を待つ
+        # 最初の一曲目の情報を取得
+        initial_track = ytm.get_current_track_info()
+        print(f"[SYSTEM] 初期曲を検出: {initial_track['title']}")
+        current_track = ytm.get_current_track_info()
+    else:
+        print("\n[PLAYER] 次の曲へ進みます...")
+        ytm.next_track()
+        time.sleep(2)
+        current_track = ytm.get_current_track_info()
+        print(f"[NOW PLAYING] {current_track['title']} / {current_track['artist']}")
     
     # フェードイン
     ytm.fade_volume(1.0, duration=3.0)
@@ -78,11 +90,9 @@ def run_radio_block():
     prep_thread = threading.Thread(target=prepare_next_mc_talk, args=(current_track,))
     prep_thread.setDaemon(True) # プログラム終了時にスレッドも終了するように
     prep_thread.start()
-    
     # 音楽再生待機
     print(f"[WAIT] {PLAY_DURATION_SEC}秒間再生します (この間に次を準備)...")
     time.sleep(max(0, PLAY_DURATION_SEC - 5.0))
-    
     # フェードアウト
     print(f"[FADE OUT] {current_track['title']}")
     ytm.fade_volume(0.0, duration=5.0)
@@ -94,20 +104,11 @@ if __name__ == "__main__":
         # 0. ニュースを一括取得 (起動時に1回だけ)
         context_builder.news_manager.fetch_all_news()
 
-        # 1. 初期化: YTM開始
-        ytm.start_random_playlist()
-        time.sleep(5) # ページ遷移と再生開始を待つ
-
-        # 最初の一曲目の情報を取得
-        initial_track = ytm.get_current_track_info()
-        print(f"[SYSTEM] 初期曲を検出: {initial_track['title']}")
-
-        # 確実に停止
-        ytm.stop()
+        ytm.start()
 
         # 2. 初回のMCトークを準備 (ここは初回のみ同期で実行して確実に準備する)
         # ただし、直前の曲として initial_track を渡して紹介してもらう
-        prepare_next_mc_talk(initial_track) 
+        prepare_next_mc_talk("")
 
         print("[SYSTEM] 準備完了。放送を開始します。")
         while True:

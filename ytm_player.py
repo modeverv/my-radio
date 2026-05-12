@@ -89,13 +89,17 @@ class YTMPlayer:
         except Exception as e:
             print(f"[ytm_player] フェード実行エラー: {e}")
 
-    def start_random_playlist(self):
-        """ホーム画面からランダムなプレイリストを選択して再生を開始する"""
+    def start(self):
         try:
             print("[ytm_player] ホーム画面へ移動中...")
             self.driver.get("https://music.youtube.com/")
-            time.sleep(5) # ロード待ち
-            
+        except Exception as e:
+            print(f"[ytm_player] 初期ページ: {e}")
+
+
+    def start_random_playlist(self):
+        """ホーム画面からランダムなプレイリストを選択して再生を開始する"""
+        try:
             # 再生ボタン（オーバーレイ）を持つアイテムを探す
             # ytmusic-two-row-item-renderer はプレイリストやアルバムの一般的な要素
             selectors = [
