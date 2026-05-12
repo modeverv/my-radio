@@ -13,8 +13,10 @@ from webdriver_manager.chrome import ChromeDriverManager
 class YTMPlayer:
     def __init__(self):
         chrome_options = Options()
+        # プロセス終了後もブラウザを残す
         chrome_options.add_experimental_option("detach", True)
         
+        # プロジェクト内に専用のプロファイルディレクトリを作成
         project_dir = os.path.dirname(os.path.abspath(__file__))
         user_data_dir = os.path.join(project_dir, "chrome_profile")
         if not os.path.exists(user_data_dir):
@@ -22,10 +24,14 @@ class YTMPlayer:
             
         chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
         chrome_options.add_argument("--profile-directory=Default")
+        
+        # 安定性のためのフラグ
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--remote-allow-origins=*")
+        
+        # 自動操作の検知を回避
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option("useAutomationExtension", False)
@@ -44,46 +50,57 @@ class YTMPlayer:
         except Exception as e:
             print(f"\n--- CHROME STARTUP ERROR ---\n{e}")
             raise e
-def fade_volume(self, target_volume: float, duration: float = 2.0):
-    """ブラウザ側(JS)で滑らかに音量を変化させる (1回の呼出しで完結)"""
-    try:
-        # JavaScriptでフェード処理を実行
-        # setIntervalを使って、ブラウザの内部時計で滑らかに変化させます
-        script = f"""
-        var target = {target_volume};
-        var duration = {duration * 1000};
-        var video = document.querySelector('video');
-        if (!video) return;
 
-        var startVolume = video.volume;
-        var startTime = performance.now();
-
-        var fade = setInterval(function() {{
-            var elapsed = performance.now() - startTime;
-            var progress = elapsed / duration;
-
-            if (progress >= 1) {{
-                video.volume = target;
-                clearInterval(fade);
-            }} else {{
-                video.volume = startVolume + (target - startVolume) * progress;
+    def fade_volume(self, target_volume: float, duration: float = 2.0):
+        """ブラウザ側(JS)で滑らかに音量を変化させる (1回の呼出しで完結)"""
+        try:
+            script = f"""
+            var target = {target_volume};
+            var duration = {duration * 1000};
+            var video = document.querySelector('video');
+            if (!video) {{
+                console.log("fade_volume: video要素が見つかりません");
+                return;
             }}
-        }}, 50); // 50msごとに更新
-        """
-        self.driver.execute_script(script)
-
-        # Python側ではフェードが終わるまで待機（同期を保つため）
-        time.sleep(duration)
-    except Exception as e:
-        print(f"[ytm_player] フェード実行エラー: {e}")
-
+            
+            var startVolume = video.volume;
+            var startTime = performance.now();
+            console.log("フェード開始: 現在の音量=" + startVolume + " -> 目標=" + target + " (" + duration + "ms)");
+            
+            var fade = setInterval(function() {{
+                var elapsed = performance.now() - startTime;
+                var progress = elapsed / duration;
+                
+                if (progress >= 1) {{
+                    video.volume = target;
+                    clearInterval(fade);
+                    console.log("フェード完了: 現在の音量=" + video.volume);
+                }} else {{
+                    video.volume = startVolume + (target - startVolume) * progress;
+                    // ログが多すぎないように10回に1回程度出力
+                    if (Math.random() < 0.1) {{
+                        console.log("フェード中... 現在の音量:", video.volume.toFixed(2));
+                    }}
+                }}
+            }}, 50);
+            """
+            self.driver.execute_script(script)
+            time.sleep(duration)
+        except Exception as e:
+            print(f"[ytm_player] フェード実行エラー: {e}")
 
     def search_and_play(self, query: str) -> bool:
         """現在のコンテキスト(プレイリスト内か検索結果か)を判断して再生する"""
         try:
-            # 音量を0にしておく
+            # 前の曲を確実に停止し、音量を0にしておく
             try:
-                self.driver.execute_script("document.querySelector('video').volume = 0.0")
+                self.driver.execute_script("""
+                    var video = document.querySelector('video');
+                    if (video) {
+                        video.volume = 0.0;
+                        video.pause();
+                    }
+                """)
             except:
                 pass
 
@@ -94,11 +111,17 @@ def fade_volume(self, target_volume: float, duration: float = 2.0):
             if "list=" in current_url:
                 print(f"[ytm_player] プレイリスト内で探しています: {song_title}")
                 if self._play_from_list(song_title):
+                    # 再生開始直後に音量を0にリセット
+                    self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
                     return True
                 print(f"[ytm_player] プレイリスト内に見つかりません。検索に切り替えます。")
 
             # 2. 検索を実行して再生する
-            return self._execute_search_and_play(query)
+            success = self._execute_search_and_play(query)
+            if success:
+                # 再生開始直後に音量を0にリセット
+                self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
+            return success
 
         except Exception as e:
             print(f"[ytm_player] 再生処理でエラーが発生しました: {e}")
@@ -108,16 +131,13 @@ def fade_volume(self, target_volume: float, duration: float = 2.0):
         """現在のページ（プレイリスト）内から曲を探してクリックする"""
         try:
             wait = WebDriverWait(self.driver, 5)
-            # タイトル要素を検索 (containsを使うことで部分一致に対応)
             xpath = f"//yt-formatted-string[contains(@class, 'title') and contains(text(), '{song_title}')]"
             song_element = wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
             
-            # 親の行要素を取得してスクロール
             parent_row = song_element.find_element(By.XPATH, "./ancestor::ytmusic-responsive-list-item-renderer")
             self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", parent_row)
             time.sleep(1)
             
-            # ホバーして再生ボタンをクリック
             actions = ActionChains(self.driver)
             actions.move_to_element(parent_row).perform()
             time.sleep(0.5)
@@ -136,7 +156,6 @@ def fade_volume(self, target_volume: float, duration: float = 2.0):
             print(f"[ytm_player] グローバル検索を実行中: {query}")
             wait = WebDriverWait(self.driver, 10)
             
-            # 検索ボタンをクリックして入力欄を出す
             try:
                 search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "ytmusic-search-box")))
                 search_button.click()
@@ -148,9 +167,8 @@ def fade_volume(self, target_volume: float, duration: float = 2.0):
             search_input.send_keys(query)
             search_input.send_keys(Keys.ENTER)
             
-            time.sleep(3) # 結果反映待ち
+            time.sleep(3) 
             
-            # A: トップ結果の大きなボタン
             try:
                 top_play_button = self.driver.find_element(By.XPATH, "//ytmusic-card-shelf-renderer//ytmusic-play-button-renderer")
                 self.driver.execute_script("arguments[0].click();", top_play_button)
@@ -159,7 +177,6 @@ def fade_volume(self, target_volume: float, duration: float = 2.0):
             except:
                 pass
                 
-            # B: 検索結果リストの最初のボタン
             try:
                 play_button = self.driver.find_element(By.CSS_SELECTOR, "ytmusic-responsive-list-item-renderer ytmusic-play-button-renderer")
                 self.driver.execute_script("arguments[0].click();", play_button)
@@ -176,20 +193,37 @@ def fade_volume(self, target_volume: float, duration: float = 2.0):
     def stop(self):
         """再生を停止し、音量を完全に0にする"""
         try:
-            # まず音量を0にする
-            self.driver.execute_script("try { document.querySelector('video').volume = 0.0; } catch(e) {}")
+            # JSで状態を確認しながら停止
+            self.driver.execute_script("""
+                var video = document.querySelector('video');
+                if (video) {
+                    video.volume = 0.0;
+                    if (!video.paused) {
+                        video.pause();
+                        console.log("[ytm_player] JSでvideoを一時停止しました");
+                    }
+                }
+            """)
             
-            # 再生中であれば一時停止ボタンを押す
-            play_pause = self.driver.find_element(By.ID, "play-pause-button")
-            if "Pause" in play_pause.get_attribute("aria-label"):
-                play_pause.click()
-                print("[ytm_player] 再生を停止しました。")
-        except Exception as e:
-            # 停止に失敗しても、音量だけは0にする試行
+            # UIのボタン状態を確認して、まだ「再生中（Pause表示）」ならクリックしてUIを同期
             try:
-                self.driver.execute_script("document.querySelector('video').volume = 0.0")
+                play_pause = self.driver.find_element(By.ID, "play-pause-button")
+                label = play_pause.get_attribute("aria-label")
+                # 再生中を示すラベル（Pause/一時停止）がある場合のみクリック
+                if label and ("Pause" in label or "一時停止" in label):
+                    # JSで止めた直後はラベルがすぐ変わらないことがあるので、
+                    # 念のためJS側のpausedも再確認
+                    is_paused = self.driver.execute_script("return document.querySelector('video') ? document.querySelector('video').paused : true")
+                    if not is_paused:
+                        play_pause.click()
+                        print(f"[ytm_player] ボタンクリックで停止を確定しました (Label: {label})")
+                else:
+                    print(f"[ytm_player] 既に停止状態です (Label: {label})")
             except:
                 pass
+                
+        except Exception as e:
+            print(f"[ytm_player] 停止処理エラー: {e}")
 
     def quit(self):
         self.driver.quit()
