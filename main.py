@@ -26,11 +26,12 @@ def prepare_next_mc_talk(track_info):
         # 重い処理（ネットワークI/O）をすべてスレッド内で実行
         context = context_builder.get_context()
         direction = llm_director.get_direction(context, track_info)
-        
+
         with next_segment_data["lock"]:
             next_segment_data["script"] = direction["mc_script"]
             next_segment_data["show_title"] = direction["show_title"]
             next_segment_data["ready"] = True
+            next_segment_data["path"] = tts.make(direction["mc_script"])
         print("[SYSTEM] 次のMCトークの準備が完了しました。")
     except Exception as e:
         print(f"[ERROR] バックグラウンド準備中にエラー: {e}")
@@ -42,10 +43,12 @@ def run_radio_block():
     global last_track_info, next_segment_data
     
     # 1. 前のループで準備されたMCトークを再生
+    path = ""
     while True:
         with next_segment_data["lock"]:
             if next_segment_data["ready"]:
                 script = next_segment_data["script"]
+                path = next_segment_data["path"]
                 show_title = next_segment_data["show_title"]
                 next_segment_data["ready"] = False
                 break
@@ -53,13 +56,15 @@ def run_radio_block():
 
     print(f"\n{'='*50}")
     print(f"[SHOW] {show_title}")
-    
+
     ytm.stop()
+
     print("[TTS] MCトーク再生中...")
-    tts.speak(script)
+    print(script)
+    tts.speak(path)
 
     # 2. 曲の切り替え & 再生開始
-    print(f"\n[PLAYER] 次の曲へ進みます...")
+    print("\n[PLAYER] 次の曲へ進みます...")
     ytm.next_track()
     time.sleep(2)
     current_track = ytm.get_current_track_info()

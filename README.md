@@ -1,12 +1,14 @@
 # My Radio Station System (YTM Edition)
 
 ローカル環境（macOS）で動作する、自動ラジオ局システムです。RSSから最新ニュースを取得し、YouTube Music の日本チャートから選曲。ローカルLLMでMC台本を生成し、VOICEVOXで読み上げながらブラウザ（Selenium）で楽曲を再生します。
+＜開発中＞
+初っ端が不安定
 
 ## システム構成
 
 - **Scheduler:** Python (`main.py`)
 - **Context:** RSS News (BBC/CNN/NHK) + Time-based Mood
-- **Selection:** YouTube Music Japan Charts (`youtube_client.py` via `ytmusicapi`)
+- **Selection:** YouTube Music Japan Charts (`youtube_client.py`)
 - **Director:** LM Studio (Local LLM - MC Script & Song Selection)
 - **Player:** YouTube Music via Selenium/Chrome (`ytm_player.py`)
 - **TTS:** VOICEVOX (Zundamon)
@@ -35,10 +37,6 @@ make run
 ```
 1セグメント（MCトーク + 楽曲2曲）のサイクルで無限ループ実行されます。
 
-### テスト
-```bash
-make test
-```
 
 ## 主な機能
 

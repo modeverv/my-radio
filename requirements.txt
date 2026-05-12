@@ -1,8 +1,5 @@
 feedparser
 openai
-Janome
 requests
 selenium
 webdriver-manager
-ytmusicapi
-python-dotenv
